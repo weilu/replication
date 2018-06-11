@@ -31,7 +31,16 @@ get_k <- function(gdp, l) {
   return((1-ls)*gdp/w) # gdp is not even necessary
 }
 
-compute <- function(workforce, gdp) {
+LABOR_SHARE = 0.687
+get_wage <- function(gdp, labor) {
+  return(LABOR_SHARE * gdp / labor)
+}
+
+get_capital_return <- function(gdp, wage) {
+  return((1 - LABOR_SHARE) * gdp / wage)
+}
+
+compute <- function(workforce, gdp, lib_ratio) {
   capital <- get_k(gdp, workforce)
 
   partial_delta <- function(rho) {
@@ -48,8 +57,13 @@ compute <- function(workforce, gdp) {
   colnames(gammas) <- rhos
 
   try_solve_for_l <- function(i, rho, mpl) {
+
     deltai <- deltas[i, as.character(rho)]
     gammai <- gammas[i, as.character(rho)]
+
+    mpl_old <- get_mpl(gdp[i, 1], deltai, gammai, workforce[i], rho)
+    mpl <- mpl_old - (mpl_old - mpl) * lib_ratio
+
     ki <- capital[i, 1]
     fn <- function(li) {
       gdpi <- get_gdp(deltai, gammai, ki, li, rho)
@@ -121,6 +135,7 @@ compute <- function(workforce, gdp) {
     mpl_range <- find_mpl_range(rho)
     # print(mpl_range)
     for (mpl in seq(mpl_range[1], mpl_range[2], 10)) {
+      # mpl in the context of partial liberalization is global mean mpl
       # solve for l1, l2 and l3 with the given mpl
       solve_for_l <- function(j) {
         return(try_solve_for_l(j, rho, mpl))
@@ -141,6 +156,12 @@ compute <- function(workforce, gdp) {
     print(paste('sigma:', elasticities[i], 'rho:', rho, ' mpl:', solved_mpl))
     print(paste('abs pop diff (billion):', min_pop_diff))
     print(paste('gdp diff (billion $):', sum(solved['gdp'], na.rm = T) - sum(gdp)))
+    old_wages <- get_wage(gdp, workforce)
+    new_wages <- get_wage(solved['gdp'], solved['labor'])
+    print(paste('wage diff (%):', (new_wages - old_wages) / old_wages * 100))
+    old_rok <- get_capital_return(gdp, old_wages)
+    new_rok <- get_capital_return(solved['gdp'], new_wages)
+    print(paste('capital return diff (%):', (new_rok - old_rok) / old_rok * 100))
     print('-------------------------------------------')
   }
 }
@@ -159,17 +180,21 @@ rhos = get_rho(elasticities)
 pop_gdp <- read.csv("borderstest2.csv")
 gdp <-pop_gdp['GDP']
 
+##### table 4 #####
 # no adjustment
-workforce <- pop_gdp['Pop']
-compute(workforce, gdp)
+workforce <- pop_gdp['Pop'][, 1]
+compute(workforce, gdp, 1)
 
 # PW adjustment
-compute(pw_adjust(workforce[, 1]), gdp)
+compute(pw_adjust(workforce), gdp, 1)
 
 # EU3 & EU5 adjustment
-compute(eu35_adjust(workforce[, 1]), gdp)
+compute(eu35_adjust(workforce), gdp, 1)
 
 # both adjustments
-compute(eu35_adjust(pw_adjust(workforce[, 1])), gdp)
+compute(eu35_adjust(pw_adjust(workforce)), gdp, 1)
 
+##### table 8 & table 9 (partial) #####
+# both adjustments, 10% liberalization
+compute(eu35_adjust(pw_adjust(workforce)), gdp, 0.1)
 
