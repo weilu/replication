@@ -1,0 +1,151 @@
+---
+title: "Replication: The Political Economy Consequences of China’s Export Slowdown"
+author: "Wei Lu"
+output:
+  html_document:
+    toc: TRUE
+---
+
+```{r setup, include=FALSE}
+library(readstata13)
+library(tidyverse)
+knitr::opts_knit$set(root.dir = '/Users/luwei/Dropbox/GDELT/')
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+Merge prefecture level export data with and without interim export, check correlation
+
+```{r merge_export}
+export_by_prefect_no_interim <- read.dta13('Trade Data/Customs/export_prefect_hs6_1015_noint.dta')
+export_by_prefect <- read.dta13('Trade Data/Customs/export_prefect_hs6_1015.dta')
+export_merged <- merge(export_by_prefect_no_interim, export_by_prefect, by=c('nbs_prefect', 'hs07_6', 'year'))
+export_merged <- as.tibble(export_merged) %>%
+  rename(export_no_int = export_cus.x, export = export_cus.y, hs6 = hs07_6, prefect = nbs_prefect)
+
+export_merged
+cor(export_merged['export'], export_merged['export_no_int'])
+```
+
+Merge export data with HS07 and SIC code mapping file, extract manufacturing numbers
+
+```{r merge_sic}
+hs07_sic <- read.dta13('Trade Data/Product Category/HS07_SIC.dta')
+export_merged_with_sic <- merge(export_merged, hs07_sic, by.y='hs6', all.x=T)
+export_manufacturing_merged <- as.tibble(export_merged_with_sic) %>%
+  filter(grepl('^2|^3', sic) | hs6 %in% c("610429", "691200", "845011", "902790")) %>%
+  select(prefect, year, hs6, export, export_no_int)
+```
+
+Tally total export by prefecture of year 2010 and 2012 (Only used in alternative construction)
+
+```{r total_export}
+total_by_prefect_2010 <- export_manufacturing_merged %>%
+  filter(year == 2010) %>%
+  group_by(prefect, year) %>%
+  summarize(total_exp = sum(export))
+
+total_by_prefect_2012 <- export_manufacturing_merged %>%
+  filter(year == 2012) %>%
+  group_by(prefect, year) %>%
+  summarize(total_exp = sum(export))
+```
+
+Check against stata numbers, tolerance = 1
+
+```{r check_total_export}
+total_exp_2010 <- as.tibble(read.dta13('total_export_cus_pref_2010_temp.dta'))
+total_exp_2012 <- as.tibble(read.dta13('total_export_cus_pref_2012_temp.dta'))
+
+merged <- merge(total_by_prefect_2010, total_exp_2010, by='prefect', all=T)
+merged[is.na(merged)] <- 0 # fill missing with 0
+diff_2010 <- as.tibble(merged) %>%
+  mutate(diff = total_exp - total_export_cus_pref_2010 * 1000) %>%
+  filter(abs(diff) > 1) # test against tolerance, expecting empty dataframe
+diff_2010
+
+merged <- merge(total_by_prefect_2012, total_exp_2012, by='prefect', all=T)
+merged[is.na(merged)] <- 0 # fill missing with 0
+diff_2012 <- as.tibble(merged) %>%
+  mutate(diff = total_exp - total_export_cus_pref_2012 * 1000) %>%
+  filter(abs(diff) > 1)
+diff_2012
+```
+
+Load GDP data & restore gdp dollar unit.
+Load population data and use age 15-64 as labor data.
+
+```{r merge_gdp_pop}
+gdp_2010 <- as.tibble(read.dta13('Trade Data/GDP2010.dta')) %>%
+  mutate(gdp_dollar=GDP_USD * 100000000) %>%
+  select(prefect, gdp_dollar)
+pop_2010 <- as.tibble(read.dta13('Controls/Demographic/demographic_structure_2010_Nov17.dta')) %>%
+  select(prefect, pop1564_2010)
+gdp_pop_2010 <- as.tibble(merge(gdp_2010, pop_2010, by='prefect'))
+```
+
+Calculate shocks: $ExpShock_{it} = \sum_k{\frac{\Delta X_{ikt}}{L_{i, 2010}}}$. This step takes a while to compute
+
+```{r export_shock, results='hide'}
+export_shocks <- export_manufacturing_merged %>%
+  group_by(prefect, hs6) %>%
+  mutate(export_diff = export - lag(export, order_by=year),
+         export_no_int_diff = export_no_int - lag(export_no_int, order_by=year)) %>%
+  group_by(prefect, year) %>%
+  summarize(agg_export_shock = sum(export_diff, na.rm = T),
+            agg_export_no_int_shock = sum(export_no_int_diff, na.rm = T)) %>%
+  inner_join(gdp_pop_2010) %>%
+  mutate(shock_usdk_per_worker = agg_export_shock / 1000 / pop1564_2010,
+         shock_no_int_usdk_per_worker = agg_export_no_int_shock / 1000 / pop1564_2010)
+```
+
+Check against stata numbers
+
+```{r check_export_shock}
+export_shocks_stata <- as.tibble(read.dta13('Trade Data/export_pref_shock_Nov17.dta'))
+export_shocks_stata %>%
+  select(prefect, year, d_export_cus_pw, d_export_cus_ni_pw)
+
+export_shocks %>%
+  select(prefect, year, shock_usdk_per_worker, shock_no_int_usdk_per_worker)
+```
+
+Calculate IV: $ExpShockROW_{it} = \sum_k{\frac{X_{ik, 2010}}{\sum_i{X_{ik, 2010}}} \frac{\Delta X_{kt}^{ROW}}{L_{i, 2010}}}$
+ROW to ROW product level data from UN Comtrade
+
+```{r export_shock_row}
+comtrade <- as.tibble(read.dta13('Trade Data/UNComtrade/export_hs6_Nov17.dta')) %>%
+  select(year, hs07_6, ExpROW_ROW) %>%
+  group_by(hs07_6) %>%
+  mutate(export_row_row_diff = ExpROW_ROW - lag(ExpROW_ROW, order_by=year)) %>%
+  rename(hs6 = hs07_6)
+
+total_by_product_2010 <- export_manufacturing_merged %>%
+  filter(year == 2010) %>%
+  group_by(year, hs6) %>%
+  summarize(total_exp = sum(export), total_exp_no_int = sum(export_no_int))
+
+export_shocks_row <- export_manufacturing_merged %>%
+  filter(year == 2010) %>%
+  inner_join(total_by_product_2010, by=c('year', 'hs6')) %>%
+  inner_join(comtrade, by='hs6') %>%
+  rename(year = year.y) %>%
+  select(-one_of('year.x')) %>% # drop the year 2010 column
+  mutate(prefect_exp_scaled_shock = export * export_row_row_diff / total_exp,
+         prefect_exp_scaled_shock_no_int = export_no_int * export_row_row_diff / total_exp_no_int) %>%
+  group_by(prefect, year) %>%
+  summarize(agg_export_shock = sum(prefect_exp_scaled_shock, na.rm = T),
+            agg_export_no_int_shock = sum(prefect_exp_scaled_shock_no_int, na.rm = T)) %>%
+  inner_join(gdp_pop_2010) %>%
+  mutate(shock_usdk_per_worker = agg_export_shock / 1000 / pop1564_2010,
+         shock_no_int_usdk_per_worker = agg_export_no_int_shock / 1000 / pop1564_2010)
+```
+
+Check against stata numbers
+
+```{r check_export_shock_row}
+export_shocks_stata %>%
+  select(prefect, year, d_export_btkrow_pw, d_export_btkrow_ni_pw)
+
+export_shocks_row %>%
+  select(prefect, year, shock_usdk_per_worker, shock_no_int_usdk_per_worker)
+```
