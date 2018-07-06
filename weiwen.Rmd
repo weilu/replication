@@ -9,9 +9,13 @@ output:
 ```{r setup, include=FALSE}
 library(readstata13)
 library(tidyverse)
+library(lfe)
+library(stargazer)
 knitr::opts_knit$set(root.dir = '/Users/luwei/Dropbox/GDELT/')
 knitr::opts_chunk$set(cache=TRUE)
 ```
+
+### Variable Construction
 
 Merge prefecture level export data with and without interim export, check correlation
 
@@ -72,21 +76,21 @@ diff_2012 <- as.tibble(merged) %>%
 diff_2012
 ```
 
-Load GDP data & restore gdp dollar unit.
-Load population data and use age 15-64 as labor data.
+Load population data from 2010 and 2000 and use age 15-64 as labor data.
+2010 data is used for baseline; 2000 data is used for IV.
 
-```{r merge_gdp_pop}
-gdp_2010 <- as.tibble(read.dta13('Trade Data/GDP2010.dta')) %>%
-  mutate(gdp_dollar=GDP_USD * 100000000) %>%
-  select(prefect, gdp_dollar)
+```{r load_pop}
 pop_2010 <- as.tibble(read.dta13('Controls/Demographic/demographic_structure_2010_Nov17.dta')) %>%
-  select(prefect, pop1564_2010)
-gdp_pop_2010 <- as.tibble(merge(gdp_2010, pop_2010, by='prefect'))
+  rename(pop1564 = pop1564_2010) %>%
+  select(prefect, pop1564)
+pop_2000 <- as.tibble(read.dta13('Controls/Demographic/demographic_structure_2000_Nov17.dta')) %>%
+  rename(pop1564 = pop1564_2000) %>%
+  select(prefect, pop1564)
 ```
 
 Calculate shocks: $ExpShock_{it} = \sum_k{\frac{\Delta X_{ikt}}{L_{i, 2010}}}$. This step takes a while to compute
 
-```{r export_shock, results='hide'}
+```{r export_shock}
 export_shocks <- export_manufacturing_merged %>%
   group_by(prefect, hs6) %>%
   mutate(export_diff = export - lag(export, order_by=year),
@@ -94,23 +98,36 @@ export_shocks <- export_manufacturing_merged %>%
   group_by(prefect, year) %>%
   summarize(agg_export_shock = sum(export_diff, na.rm = T),
             agg_export_no_int_shock = sum(export_no_int_diff, na.rm = T)) %>%
-  inner_join(gdp_pop_2010) %>%
-  mutate(shock_usdk_per_worker = agg_export_shock / 1000 / pop1564_2010,
-         shock_no_int_usdk_per_worker = agg_export_no_int_shock / 1000 / pop1564_2010)
+  inner_join(pop_2010) %>%
+  mutate(shock_usdk_per_worker = agg_export_shock / 1000 / pop1564,
+         shock_no_int_usdk_per_worker = agg_export_no_int_shock / 1000 / pop1564)
+
+export_shocks
 ```
 
 Check against stata numbers
 
 ```{r check_export_shock}
 export_shocks_stata <- as.tibble(read.dta13('Trade Data/export_pref_shock_Nov17.dta'))
-export_shocks_stata %>%
-  select(prefect, year, d_export_cus_pw, d_export_cus_ni_pw)
 
-export_shocks %>%
-  select(prefect, year, shock_usdk_per_worker, shock_no_int_usdk_per_worker)
+export_shocks_pw_stata <- export_shocks_stata %>%
+  select(prefect, year, d_export_cus_pw, d_export_cus_ni_pw) %>%
+  filter(year > 2010)
+
+export_shocks <- export_shocks %>%
+  select(prefect, year, shock_usdk_per_worker, shock_no_int_usdk_per_worker)  %>%
+  filter(year > 2010)
+
+merged <- merge(export_shocks, export_shocks_pw_stata, by=c('prefect', 'year'), all=T)
+merged[is.na(merged)] <- 0 # fill missing with 0
+diff_export_shock <- as.tibble(merged) %>%
+  mutate(diff_export_pw = d_export_cus_pw - shock_usdk_per_worker,
+         diff_export_ni_pw = d_export_cus_ni_pw - shock_no_int_usdk_per_worker) %>%
+  filter(abs(diff_export_pw) > 1 | abs(diff_export_ni_pw) > 1 ) # test against tolerance, expecting empty dataframe
+diff_export_shock
 ```
 
-Calculate IV: $ExpShockROW_{it} = \sum_k{\frac{X_{ik, 2010}}{\sum_i{X_{ik, 2010}}} \frac{\Delta X_{kt}^{ROW}}{L_{i, 2010}}}$
+Calculate IV: $ExpShockROW_{it} = \sum_k{\frac{X_{ik, 2010}}{\sum_i{X_{ik, 2010}}} \frac{\Delta X_{kt}^{ROW}}{L_{i, 2000}}}$
 ROW to ROW product level data from UN Comtrade, note that the data is in \$1000 USD unit
 
 ```{r export_shock_row}
@@ -136,17 +153,98 @@ export_shocks_row <- export_manufacturing_merged %>%
   group_by(prefect, year) %>%
   summarize(agg_export_shock = sum(prefect_exp_scaled_shock, na.rm = T),
             agg_export_no_int_shock = sum(prefect_exp_scaled_shock_no_int, na.rm = T)) %>%
-  inner_join(gdp_pop_2010) %>%
-  mutate(shock_usdk_per_worker = agg_export_shock / pop1564_2010,
-         shock_no_int_usdk_per_worker = agg_export_no_int_shock / pop1564_2010)
+  inner_join(pop_2000) %>%
+  mutate(shock_usdk_per_worker = agg_export_shock / pop1564,
+         shock_no_int_usdk_per_worker = agg_export_no_int_shock / pop1564)
 ```
 
 Check against stata numbers
 
 ```{r check_export_shock_row}
-export_shocks_stata %>%
-  select(prefect, year, d_export_btkrow_pw, d_export_btkrow_ni_pw)
+export_shocks_row_pw_stata <- export_shocks_stata %>%
+  select(prefect, year, d_export_btkrow_pw00, d_export_btkrow_ni_pw00) %>%
+  filter(year > 2010)
 
-export_shocks_row %>%
-  select(prefect, year, shock_usdk_per_worker, shock_no_int_usdk_per_worker)
+export_shocks_row <- export_shocks_row %>%
+  select(prefect, year, shock_usdk_per_worker, shock_no_int_usdk_per_worker)  %>%
+  filter(year > 2010)
+
+merged <- merge(export_shocks_row, export_shocks_row_pw_stata, by=c('prefect', 'year'), all=T)
+merged[is.na(merged)] <- 0 # fill missing with 0
+diff_export_shock <- as.tibble(merged) %>%
+  mutate(diff_export_pw = d_export_btkrow_pw00 - shock_usdk_per_worker,
+         diff_export_ni_pw = d_export_btkrow_ni_pw00 - shock_no_int_usdk_per_worker) %>%
+  filter(abs(diff_export_pw) > 1 | abs(diff_export_ni_pw) > 1 ) # test against tolerance, expecting empty dataframe
+diff_export_shock
+```
+
+### Panel Regression
+
+Model: $\Delta(Events/L)_{it} = \beta_0(Events/L)_{i, t-1} + \beta ExpShock_{it} + \beta_x X_{it} + D_{prov, t} + D_i + \epsilon_{it}$
+
+Note that we have verified the stata numbers above, so here we use merged data from stata for regressions directly.
+
+- Q: Where did $X_{it}$ go in regressions?
+- Q: Why do we need to apply weights?
+- Q: Which rows is Stata omitting? It seems to be omitting more than just rows with missing values
+- Q: How are the first stage F stats calculated? waldtest?
+
+```{r ols}
+workfile_data <- as.tibble(read.dta13('CCL_workfile_Nov17.dta'))
+ols_data <- workfile_data %>%
+  filter(year>=2013 & year<=2015) %>%
+  mutate(prefect_dummy = as.factor(prefect), province_year_dummy = as.factor(province_year), province_dummy = as.factor(province)) %>%
+  filter(!is.na(prefect_dummy) & !is.na(province_year_dummy) & !is.na(d_event_pw) & !is.na(lag_event_pw) & !is.na(d_export_cus_pw)) %>%
+  select(d_event_pw, lag_event_pw, d_export_cus_pw, d_export_btkchn_pw00, d_export_btkrow_pw00,
+         prefect_dummy, province_year_dummy, province_dummy, prefect, province_year, province,
+         pop1564_2010,
+         dln_Average_wage, dln_GRP_popCSY, dln_college_enroll_popCSY,
+         dln_Mobile_Tel_popCSY, dln_Internet_Tel_popCSY)
+
+# remove singletons like reghdfe does (TODO: iteratively remove)
+province_year_singletons <- ols_data %>%
+  group_by(province_year_dummy) %>%
+  filter(n() == 1)
+ols_data <- ols_data %>%
+  anti_join(province_year_singletons)
+
+# lm produces the correct point estimates, but standard errors are off
+# Stata's aweights = R's weights in linear regression: https://rstudio-pubs-static.s3.amazonaws.com/279455_1ca98bc2ce5f45ed9ea20a647ef0c4b1.html#analytics_weights_=_glm_weights_param
+ols_model_lm <- lm(d_event_pw ~ lag_event_pw + d_export_cus_pw  + prefect_dummy + province_year_dummy, data = ols_data, weights=pop1564_2010)
+ols_model_lm$coefficients[1:3]
+
+group_count <- length(unique(ols_data$province_dummy)) - 1
+se_multiplier <- sqrt((ols_model$N - ols_model$df.residual - group_count) / (ols_model$N - ols_model$df.residual))
+ols_model <- felm(d_event_pw ~ lag_event_pw + d_export_cus_pw  | prefect + province_year | 0 | province, ols_data, weights=ols_data$pop1564_2010, na.action=na.omit, exactDOF=T)
+summary(ols_model)$coefficients[, 2] * se_multiplier
+
+ols_model_plm <- plm(d_event_pw ~ lag_event_pw + d_export_cus_pw, index = c('prefect', 'province_year'), data = ols_data, weights=pop1564_2010, effect = "individual", model = "within")
+G <- length(unique(ols_data$province_dummy))
+N <- length(ols_data$province_dummy)
+dfa <- (G/(G - 1)) * (N - 1)/ols_model_plm$df.residual
+province_c_vcov <- dfa * vcovHC(ols_model_plm, type = "HC0", cluster = "group", adjust = T)
+coeftest(ols_model_plm, vcov = province_c_vcov)
+
+
+```
+
+Build IV models
+
+```{r iv}
+chn_iv_model <- felm(d_event_pw ~ lag_event_pw | prefect + province_year | (d_export_cus_pw ~ d_export_btkchn_pw00) | province, ols_data, weights=ols_data$pop1564_2010)
+row_iv_model <- felm(d_event_pw ~ lag_event_pw | prefect + province_year | (d_export_cus_pw ~ d_export_btkrow_pw00) | province, ols_data, weights=ols_data$pop1564_2010)
+row_iv_control1_model <- felm(d_event_pw ~ lag_event_pw +  dln_Average_wage + dln_GRP_popCSY + dln_college_enroll_popCSY | prefect + province_year | (d_export_cus_pw ~ d_export_btkrow_pw00) | province, ols_data, weights=ols_data$pop1564_2010)
+row_iv_control2_model <- felm(d_event_pw ~ lag_event_pw +  dln_Average_wage + dln_GRP_popCSY + dln_college_enroll_popCSY + dln_Mobile_Tel_popCSY + dln_Internet_Tel_popCSY | prefect + province_year | (d_export_cus_pw ~ d_export_btkrow_pw00) | province, ols_data, weights=ols_data$pop1564_2010)
+```
+
+Produce regression table
+
+```{r reg_table, results='asis'}
+get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
+first_stage_f <- sapply(list(chn_iv_model, row_iv_model, row_iv_control1_model, row_iv_control2_model), get_first_stage_f)
+
+stargazer(ols_model, chn_iv_model, row_iv_model, row_iv_control1_model, row_iv_control2_model, type='html',
+          column.labels = c('OLS', 'IV (CHN)', 'IV (ROW)', 'IV (ROW)', 'IV (ROW)'), omit.stat = c('adj.rsq'),
+          digits = 4, order = c(2, 8, 1, 3, 4, 5, 6, 7),
+          add.lines = list(c('First-stage F-stat', '', first_stage_f)))
 ```
