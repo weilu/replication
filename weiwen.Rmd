@@ -1,5 +1,5 @@
 ---
-title: "Replication: The Political Economy Consequences of China’s Export Slowdown"
+title: "[Data Replication]: The Political Economy Consequences of China’s Export Slowdown"
 author: "Wei Lu"
 output:
   html_document:
@@ -9,8 +9,6 @@ output:
 ```{r setup, include=FALSE}
 library(readstata13)
 library(tidyverse)
-library(lfe)
-library(stargazer)
 knitr::opts_knit$set(root.dir = '/Users/luwei/Dropbox/GDELT/')
 knitr::opts_chunk$set(cache=TRUE)
 ```
@@ -178,73 +176,3 @@ diff_export_shock <- as.tibble(merged) %>%
 diff_export_shock
 ```
 
-### Panel Regression
-
-Model: $\Delta(Events/L)_{it} = \beta_0(Events/L)_{i, t-1} + \beta ExpShock_{it} + \beta_x X_{it} + D_{prov, t} + D_i + \epsilon_{it}$
-
-Note that we have verified the stata numbers above, so here we use merged data from stata for regressions directly.
-
-- Q: Where did $X_{it}$ go in regressions?
-- Q: Why do we need to apply weights?
-- Q: Which rows is Stata omitting? It seems to be omitting more than just rows with missing values
-- Q: How are the first stage F stats calculated? waldtest?
-
-```{r ols}
-workfile_data <- as.tibble(read.dta13('CCL_workfile_Nov17.dta'))
-ols_data <- workfile_data %>%
-  filter(year>=2013 & year<=2015) %>%
-  mutate(prefect_dummy = as.factor(prefect), province_year_dummy = as.factor(province_year), province_dummy = as.factor(province)) %>%
-  filter(!is.na(prefect_dummy) & !is.na(province_year_dummy) & !is.na(d_event_pw) & !is.na(lag_event_pw) & !is.na(d_export_cus_pw)) %>%
-  select(d_event_pw, lag_event_pw, d_export_cus_pw, d_export_btkchn_pw00, d_export_btkrow_pw00,
-         prefect_dummy, province_year_dummy, province_dummy, prefect, province_year, province,
-         pop1564_2010,
-         dln_Average_wage, dln_GRP_popCSY, dln_college_enroll_popCSY,
-         dln_Mobile_Tel_popCSY, dln_Internet_Tel_popCSY)
-
-# remove singletons like reghdfe does (TODO: iteratively remove)
-province_year_singletons <- ols_data %>%
-  group_by(province_year_dummy) %>%
-  filter(n() == 1)
-ols_data <- ols_data %>%
-  anti_join(province_year_singletons)
-
-# lm produces the correct point estimates, but standard errors are off
-# Stata's aweights = R's weights in linear regression: https://rstudio-pubs-static.s3.amazonaws.com/279455_1ca98bc2ce5f45ed9ea20a647ef0c4b1.html#analytics_weights_=_glm_weights_param
-ols_model_lm <- lm(d_event_pw ~ lag_event_pw + d_export_cus_pw  + prefect_dummy + province_year_dummy, data = ols_data, weights=pop1564_2010)
-ols_model_lm$coefficients[1:3]
-
-group_count <- length(unique(ols_data$province_dummy)) - 1
-se_multiplier <- sqrt((ols_model$N - ols_model$df.residual - group_count) / (ols_model$N - ols_model$df.residual))
-ols_model <- felm(d_event_pw ~ lag_event_pw + d_export_cus_pw  | prefect + province_year | 0 | province, ols_data, weights=ols_data$pop1564_2010, na.action=na.omit, exactDOF=T)
-summary(ols_model)$coefficients[, 2] * se_multiplier
-
-ols_model_plm <- plm(d_event_pw ~ lag_event_pw + d_export_cus_pw, index = c('prefect', 'province_year'), data = ols_data, weights=pop1564_2010, effect = "individual", model = "within")
-G <- length(unique(ols_data$province_dummy))
-N <- length(ols_data$province_dummy)
-dfa <- (G/(G - 1)) * (N - 1)/ols_model_plm$df.residual
-province_c_vcov <- dfa * vcovHC(ols_model_plm, type = "HC0", cluster = "group", adjust = T)
-coeftest(ols_model_plm, vcov = province_c_vcov)
-
-
-```
-
-Build IV models
-
-```{r iv}
-chn_iv_model <- felm(d_event_pw ~ lag_event_pw | prefect + province_year | (d_export_cus_pw ~ d_export_btkchn_pw00) | province, ols_data, weights=ols_data$pop1564_2010)
-row_iv_model <- felm(d_event_pw ~ lag_event_pw | prefect + province_year | (d_export_cus_pw ~ d_export_btkrow_pw00) | province, ols_data, weights=ols_data$pop1564_2010)
-row_iv_control1_model <- felm(d_event_pw ~ lag_event_pw +  dln_Average_wage + dln_GRP_popCSY + dln_college_enroll_popCSY | prefect + province_year | (d_export_cus_pw ~ d_export_btkrow_pw00) | province, ols_data, weights=ols_data$pop1564_2010)
-row_iv_control2_model <- felm(d_event_pw ~ lag_event_pw +  dln_Average_wage + dln_GRP_popCSY + dln_college_enroll_popCSY + dln_Mobile_Tel_popCSY + dln_Internet_Tel_popCSY | prefect + province_year | (d_export_cus_pw ~ d_export_btkrow_pw00) | province, ols_data, weights=ols_data$pop1564_2010)
-```
-
-Produce regression table
-
-```{r reg_table, results='asis'}
-get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
-first_stage_f <- sapply(list(chn_iv_model, row_iv_model, row_iv_control1_model, row_iv_control2_model), get_first_stage_f)
-
-stargazer(ols_model, chn_iv_model, row_iv_model, row_iv_control1_model, row_iv_control2_model, type='html',
-          column.labels = c('OLS', 'IV (CHN)', 'IV (ROW)', 'IV (ROW)', 'IV (ROW)'), omit.stat = c('adj.rsq'),
-          digits = 4, order = c(2, 8, 1, 3, 4, 5, 6, 7),
-          add.lines = list(c('First-stage F-stat', '', first_stage_f)))
-```
