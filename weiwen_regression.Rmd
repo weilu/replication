@@ -1,5 +1,5 @@
 ---
-title: "[Regression Replication]: The Political Economy Consequences of China’s Export Slowdown"
+title: "Regression Replication: The Political Economy Consequences of China’s Export Slowdown"
 author: "Wei Lu"
 output:
   html_document:
@@ -15,19 +15,21 @@ knitr::opts_knit$set(root.dir = '/Users/luwei/Dropbox/GDELT/')
 knitr::opts_chunk$set(cache=TRUE)
 ```
 
-### Panel Regression
-
 Model: $\Delta(Events/L)_{it} = \beta_0(Events/L)_{i, t-1} + \beta ExpShock_{it} + \beta_x X_{it} + D_{prov, t} + D_i + \epsilon_{it}$
 
 Where $X_{it}$ represent additional control variables.
 
 Note that we have verified the stata numbers above, so here we use merged data from stata for regressions directly.
 
+### Table 1
+
 ```{r ols}
 workfile_data <- as.tibble(read.dta13('CCL_workfile_May29.dta'))
 ols_data <- workfile_data %>%
   filter(year>=2013 & year<=2015) %>%
-  mutate(prefect_dummy = as.factor(prefect), province_year_dummy = as.factor(province_year), province_dummy = as.factor(province)) %>%
+  mutate(prefect_dummy = as.factor(prefect),
+         province_year_dummy = as.factor(province_year),
+         province_dummy = as.factor(province)) %>%
   select(d_event_pw, lag_event_pw, d_export_cus_pw, d_export_btkchn_pw00, d_export_btkrow_pw00,
          prefect_dummy, province_year_dummy, province_dummy, prefect, province_year, province,
          pop1564_2010,
@@ -46,29 +48,35 @@ ols_data <- workfile_data %>%
 
 # lm produces the correct point estimates, but standard errors are off
 # Stata's aweights = R's weights in linear regression: https://rstudio-pubs-static.s3.amazonaws.com/279455_1ca98bc2ce5f45ed9ea20a647ef0c4b1.html#analytics_weights_=_glm_weights_param
-ols_model_lm <- lm(d_event_pw ~ lag_event_pw + d_export_cus_pw  + prefect_dummy + province_year_dummy, data = ols_data, weights=pop1564_2010)
+ols_model_lm <- lm(d_event_pw ~ lag_event_pw + d_export_cus_pw  + prefect_dummy + province_year_dummy,
+                   data = ols_data, weights=pop1564_2010)
 ols_model_lm$coefficients[1:3]
 
-ols_model <- felm(d_event_pw ~ lag_event_pw + d_export_cus_pw  | prefect + province_year | 0 | province, ols_data, weights=ols_data$pop1564_2010)
+ols_model <- felm(d_event_pw ~ lag_event_pw + d_export_cus_pw  | prefect + province_year | 0 | province,
+                  ols_data, weights=ols_data$pop1564_2010)
 ```
 
 Build IV models
 
 ```{r iv}
 iv_fe_iv_group_formula_str <- "| prefect + province_year | (d_export_cus_pw ~ d_export_btkrow_pw00) | province"
-row_iv_model <- felm(as.formula(paste("d_event_pw ~ lag_event_pw", iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
+row_iv_model <- felm(as.formula(paste("d_event_pw ~ lag_event_pw", iv_fe_iv_group_formula_str)),
+                     ols_data, weights=ols_data$pop1564_2010)
 
 controls <- c("dln_Average_wage", "dln_GRP_popCSY", "dln_college_enroll_popCSY")
 extra_controls <- c("dln_Mobile_Tel_popCSY", "dln_Internet_Tel_popCSY")
 iv_control1_formula_str <- paste("d_event_pw ~ lag_event_pw", paste(controls, collapse=" + "), sep=" + ")
-row_iv_control1_model <- felm(as.formula(paste(iv_control1_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
+row_iv_control1_model <- felm(as.formula(paste(iv_control1_formula_str, iv_fe_iv_group_formula_str)),
+                              ols_data, weights=ols_data$pop1564_2010)
 
 iv_control2_formula_str <- paste(iv_control1_formula_str, paste(extra_controls, collapse=" + "), sep=" + ")
-row_iv_control2_model <- felm(as.formula(paste(iv_control2_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
+row_iv_control2_model <- felm(as.formula(paste(iv_control2_formula_str, iv_fe_iv_group_formula_str)),
+                              ols_data, weights=ols_data$pop1564_2010)
 
 rf_control2_formula_str <- paste(iv_control2_formula_str, "d_export_btkrow_pw00", sep=" + ")
 rf_fe_group_formula_str <- "| prefect + province_year | 0 | province"
-rf_control2_model <- felm(as.formula(paste(rf_control2_formula_str, rf_fe_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
+rf_control2_model <- felm(as.formula(paste(rf_control2_formula_str, rf_fe_group_formula_str)),
+                          ols_data, weights=ols_data$pop1564_2010)
 ```
 
 Produce regression table 1
@@ -80,20 +88,32 @@ first_stage_f <- sapply(list(row_iv_model, row_iv_control1_model, row_iv_control
 stargazer(ols_model, row_iv_model, row_iv_control1_model, row_iv_control2_model, rf_control2_model, type='html',
           column.labels = c('OLS', 'IV', 'IV', 'IV', 'RF'),
           dep.var.caption = "Dependent variable: Changes in CLB Events per million",
-          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq'),
+          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
           digits = 4, order = c(2, 8, 9, 1, 3, 4, 5, 6, 7),
           add.lines = list(c('First-stage F-stat', '', first_stage_f)))
 ```
+
+### Table 2
 
 Build IV models by sector
 
 ```{r iv_by_sector}
 controls_formula_str <- paste(paste(controls, collapse=" + "), paste(extra_controls, collapse=" + "), sep=" + ")
-iv_manuf_model <- felm(as.formula(paste("d_event_manuf_pw ~ lag_event_manuf_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
-iv_const_model <- felm(as.formula(paste("d_event_const_pw ~ lag_event_const_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
-iv_mine_model <- felm(as.formula(paste("d_event_mine_pw ~ lag_event_mine_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
-iv_trans_model <- felm(as.formula(paste("d_event_trans_pw ~ lag_event_trans_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
-iv_serv_model <- felm(as.formula(paste("d_event_serv_pw ~ lag_event_serv_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
+iv_manuf_model <- felm(as.formula(paste("d_event_manuf_pw ~ lag_event_manuf_pw +",
+                                        controls_formula_str, iv_fe_iv_group_formula_str)),
+                       ols_data, weights=ols_data$pop1564_2010)
+iv_const_model <- felm(as.formula(paste("d_event_const_pw ~ lag_event_const_pw +",
+                                        controls_formula_str, iv_fe_iv_group_formula_str)),
+                       ols_data, weights=ols_data$pop1564_2010)
+iv_mine_model <- felm(as.formula(paste("d_event_mine_pw ~ lag_event_mine_pw +",
+                                       controls_formula_str, iv_fe_iv_group_formula_str)),
+                      ols_data, weights=ols_data$pop1564_2010)
+iv_trans_model <- felm(as.formula(paste("d_event_trans_pw ~ lag_event_trans_pw +",
+                                        controls_formula_str, iv_fe_iv_group_formula_str)),
+                       ols_data, weights=ols_data$pop1564_2010)
+iv_serv_model <- felm(as.formula(paste("d_event_serv_pw ~ lag_event_serv_pw +",
+                                       controls_formula_str, iv_fe_iv_group_formula_str)),
+                      ols_data, weights=ols_data$pop1564_2010)
 ```
 
 Produce regression table 2. The observations and R^2 are different. Stata output is identical to table 1 which is suspicious.
@@ -105,35 +125,49 @@ first_stage_f <- sapply(list(iv_manuf_model, iv_const_model, iv_mine_model, iv_t
 stargazer(iv_manuf_model, iv_const_model, iv_mine_model, iv_trans_model, iv_serv_model, type='html',
           column.labels = c('Manufacturing', 'Construction', 'Mining', 'Transportation', 'Service'),
           dep.var.caption = "Dependent variable: Changes in CLB Events per million",
-          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq'),
+          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
           digits = 4, order = c(11, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
           omit = 'dln_', omit.labels = "Additional time-t controls?",
           add.lines = list(c('First-stage F-stat', first_stage_f)))
 ```
 
+### Table 3
+
 Build IV models by cause and GDELT events. The previous regressions' dependent variables are extracted from CLB general protest event data. Here we check CLB protests with specific causes, and a different event source (GDELT).
 TODO: double check data source
 
 ```{r iv_by_cause}
-clb_wage_model <- felm(as.formula(paste("d_event_wage1_pw ~ lag_event_wage1_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
-clb_wage_layoff_model <- felm(as.formula(paste("d_event_wage2_pw ~ lag_event_wage2_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
-clb_not_wage_layoff_model <- felm(as.formula(paste("d_event_wage2a_pw ~ lag_event_wage2a_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
-gdelt_model <- felm(as.formula(paste("d_event_GDELT_pw ~ lag_event_GDELT_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
-clb_gdelt_model <- felm(as.formula(paste("d_event_pca_pw ~ lag_event_pca_pw +", controls_formula_str, iv_fe_iv_group_formula_str)), ols_data, weights=ols_data$pop1564_2010)
+clb_wage_model <- felm(as.formula(paste("d_event_wage1_pw ~ lag_event_wage1_pw +",
+                                        controls_formula_str, iv_fe_iv_group_formula_str)),
+                       ols_data, weights=ols_data$pop1564_2010)
+clb_wage_layoff_model <- felm(as.formula(paste("d_event_wage2_pw ~ lag_event_wage2_pw +",
+                                               controls_formula_str, iv_fe_iv_group_formula_str)),
+                              ols_data, weights=ols_data$pop1564_2010)
+clb_not_wage_layoff_model <- felm(as.formula(paste("d_event_wage2a_pw ~ lag_event_wage2a_pw +",
+                                                   controls_formula_str, iv_fe_iv_group_formula_str)),
+                                  ols_data, weights=ols_data$pop1564_2010)
+gdelt_model <- felm(as.formula(paste("d_event_GDELT_pw ~ lag_event_GDELT_pw +",
+                                     controls_formula_str, iv_fe_iv_group_formula_str)),
+                    ols_data, weights=ols_data$pop1564_2010)
+clb_gdelt_model <- felm(as.formula(paste("d_event_pca_pw ~ lag_event_pca_pw +",
+                                         controls_formula_str, iv_fe_iv_group_formula_str)),
+                        ols_data, weights=ols_data$pop1564_2010)
 ```
 
 Produce regression table 3.
 
 ```{r reg_table_3, results='asis'}
 get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
-first_stage_f <- sapply(list(clb_wage_model, clb_wage_layoff_model, clb_not_wage_layoff_model, gdelt_model, clb_gdelt_model), get_first_stage_f)
+first_stage_f <- sapply(list(clb_wage_model, clb_wage_layoff_model,
+                             clb_not_wage_layoff_model, gdelt_model, clb_gdelt_model),
+                        get_first_stage_f)
 
-stargazer(clb_wage_model, clb_wage_layoff_model, clb_not_wage_layoff_model, gdelt_model, clb_gdelt_model,
-          type='html',
+stargazer(clb_wage_model, clb_wage_layoff_model, clb_not_wage_layoff_model,
+          gdelt_model, clb_gdelt_model, type='html',
           column.labels = c('CLB: Wage Arrears', 'CLB: Wage Arrears & Layoffs',
                             'CLB: NOT Wage Arrears & Layoffs', 'GDELT', 'CLB & GDELT'),
           dep.var.caption = "Dependent variable: Changes in Events per million",
-          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq'),
+          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
           digits = 4, order = c(11, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
           omit = 'dln_', omit.labels = "Additional time-t controls?",
           add.lines = list(c('First-stage F-stat', first_stage_f)))
