@@ -243,3 +243,71 @@ stargazer(pub_sec_model, share_state_empl_model, hukou_model,
           omit = 'dln_', omit.labels = "Additional time-t controls?",
           add.lines = list(c('First-stage F-stat', first_stage_f)))
 ```
+
+### Table 5
+
+Note that the year filter is switched from 2013-2015 to 2014-2016 because the "weiwen" effect comes with a lag, which in the analysis is set to a year.
+
+```{r prepare_weiwen_lag_data}
+ols_weiwen_data <- workfile_data %>%
+  filter(year>=2014 & year<=2016) %>%
+  group_by(prefect) %>%
+  mutate(lag_dln_Average_wage = dln_Average_wage - lag(dln_Average_wage, order_by=year),
+         lag_dln_GRP_popCSY = dln_GRP_popCSY - lag(dln_GRP_popCSY, order_by=year),
+         lag_dln_college_enroll_popCSY = dln_college_enroll_popCSY - lag(dln_college_enroll_popCSY, order_by=year),
+         lag_dln_Mobile_Tel_popCSY = dln_Mobile_Tel_popCSY - lag(dln_Mobile_Tel_popCSY, order_by=year),
+         lag_dln_Internet_Tel_popCSY = dln_Internet_Tel_popCSY - lag(dln_Internet_Tel_popCSY, order_by=year))
+```
+
+TODO: check that `d2_export_cus_pw` of year n equals to `d_export_cus_pw` of year n-1
+TODO: check observation diff in all columns
+
+```{r iv_weiwen}
+weiwen_iv_group_formula_str <- "| prefect + province_year | (d2_export_cus_pw ~ d2_export_btkrow_pw00) | province"
+iv_keyword_model <- felm(as.formula(paste("d_share_keyword_word ~ lag_share_keyword_word",
+                                          weiwen_iv_group_formula_str)),
+                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+
+add_lag_prefix <- function(var) paste0('lag_', var)
+weiwen_controls <- sapply(c(controls, extra_controls), add_lag_prefix)
+weiwen_controls_formula_str <- paste(weiwen_controls, collapse=" + ")
+iv_keyword_control_model <- felm(as.formula(paste("d_share_keyword_word ~ lag_share_keyword_word",
+                                                  "+", weiwen_controls_formula_str,
+                                                  weiwen_iv_group_formula_str)),
+                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+
+iv_bayes_model <- felm(as.formula(paste("d_ln_para_score_w_20 ~ lag_para_score_w_20",
+                                          weiwen_iv_group_formula_str)),
+                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+iv_bayes_control_model <- felm(as.formula(paste("d_ln_para_score_w_20 ~ lag_para_score_w_20",
+                                                "+", weiwen_controls_formula_str,
+                                          weiwen_iv_group_formula_str)),
+                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+
+iv_svm_model <- felm(as.formula(paste("d_ln_para_weiwen_w_20_svm ~ lag_para_weiwen_w_20_svm",
+                                          weiwen_iv_group_formula_str)),
+                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+iv_svm_control_model <- felm(as.formula(paste("d_ln_para_weiwen_w_20_svm ~ lag_para_weiwen_w_20_svm",
+                                              "+", weiwen_controls_formula_str,
+                                          weiwen_iv_group_formula_str)),
+                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+```
+
+Produce regression table 5
+
+```{r reg_table_5, results='asis'}
+get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d2_export_cus_pw['F'])
+first_stage_f <- sapply(list(iv_keyword_model, iv_keyword_control_model,
+                             iv_bayes_model, iv_bayes_control_model,
+                             iv_svm_model, iv_svm_control_model),
+                        get_first_stage_f)
+
+stargazer(iv_keyword_model, iv_keyword_control_model, iv_bayes_model,
+          iv_bayes_control_model, iv_svm_model, iv_svm_control_model,
+          type='html',
+          column.labels = rep(c('IV: Keywords', 'IV: Naive Bayes', 'IV: SVM'), each=2),
+          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
+          digits = 4, order = c(9, 1, 7, 8),
+          omit = 'lag_dln_', omit.labels = "Additional time-t controls?",
+          add.lines = list(c('First-stage F-stat', first_stage_f)))
+```
