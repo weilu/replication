@@ -251,7 +251,7 @@ stargazer(pub_sec_model, share_state_empl_model, hukou_model,
 Note that the year filter is switched from 2013-2015 to 2014-2016 because the "weiwen" effect comes with a lag, which in the analysis is set to a year.
 
 ```{r prepare_weiwen_lag_data}
-ols_weiwen_data <- workfile_data %>%
+lagged_ols_data <- workfile_data %>%
   group_by(prefect) %>%
   mutate(lag_dln_Average_wage = lag(dln_Average_wage, order_by=year),
          lag_dln_GRP_popCSY = lag(dln_GRP_popCSY, order_by=year),
@@ -265,35 +265,35 @@ ols_weiwen_data <- workfile_data %>%
 - Note: SVM standard errors wrongly printed in Stata table
 
 ```{r iv_weiwen}
-weiwen_iv_group_formula_str <- "| prefect + province_year | (d2_export_cus_pw ~ d2_export_btkrow_pw00) | province"
+lagged_iv_group_formula_str <- "| prefect + province_year | (d2_export_cus_pw ~ d2_export_btkrow_pw00) | province"
 iv_keyword_model <- felm(as.formula(paste("d_share_keyword_word ~ lag_share_keyword_word",
-                                          weiwen_iv_group_formula_str)),
-                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+                                          lagged_iv_group_formula_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
 
 add_lag_prefix <- function(var) paste0('lag_', var)
 lag_control_vars <- c(controls, extra_controls)
-weiwen_controls <- sapply(lag_control_vars, add_lag_prefix)
-weiwen_controls_formula_str <- paste(weiwen_controls, collapse=" + ")
+lagged_controls <- sapply(lag_control_vars, add_lag_prefix)
+lagged_controls_formula_str <- paste(lagged_controls, collapse=" + ")
 iv_keyword_control_model <- felm(as.formula(paste("d_share_keyword_word ~ lag_share_keyword_word",
-                                                  "+", weiwen_controls_formula_str,
-                                                  weiwen_iv_group_formula_str)),
-                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+                                                  "+", lagged_controls_formula_str,
+                                                  lagged_iv_group_formula_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
 
 iv_bayes_model <- felm(as.formula(paste("d_ln_para_score_w_20 ~ lag_para_score_w_20",
-                                          weiwen_iv_group_formula_str)),
-                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+                                          lagged_iv_group_formula_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
 iv_bayes_control_model <- felm(as.formula(paste("d_ln_para_score_w_20 ~ lag_para_score_w_20",
-                                                "+", weiwen_controls_formula_str,
-                                          weiwen_iv_group_formula_str)),
-                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+                                                "+", lagged_controls_formula_str,
+                                          lagged_iv_group_formula_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
 
 iv_svm_model <- felm(as.formula(paste("d_ln_para_weiwen_w_20_svm ~ lag_para_weiwen_w_20_svm",
-                                          weiwen_iv_group_formula_str)),
-                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+                                          lagged_iv_group_formula_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
 iv_svm_control_model <- felm(as.formula(paste("d_ln_para_weiwen_w_20_svm ~ lag_para_weiwen_w_20_svm",
-                                              "+", weiwen_controls_formula_str,
-                                          weiwen_iv_group_formula_str)),
-                       ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
+                                              "+", lagged_controls_formula_str,
+                                          lagged_iv_group_formula_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
 ```
 
 Produce regression table 5
@@ -311,6 +311,74 @@ stargazer(iv_keyword_model, iv_keyword_control_model, iv_bayes_model,
           column.labels = rep(c('IV: Keywords', 'IV: Naive Bayes', 'IV: SVM'), each=2),
           dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
           digits = 4, order = c(9, 1, 7, 8),
+          omit = 'lag_dln_', omit.labels = "Additional time-t controls?",
+          add.lines = list(c('First-stage F-stat', first_stage_f)))
+```
+
+### Table 6
+
+```{r iv_fiscal_exp}
+fiscal_pub_sec_model <- felm(as.formula(paste("d_ln_fiscal_pub_security ~ lag_ln_fiscal_pub_security",
+                                              "+", lagged_controls_formula_str,
+                                              lagged_iv_group_formula_str)),
+                             lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+fiscal_pub_serv_model <- felm(as.formula(paste("d_ln_fiscal_pub_service ~ lag_ln_fiscal_pub_service",
+                                               "+", lagged_controls_formula_str,
+                                               lagged_iv_group_formula_str)),
+                              lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+fiscal_edu_model <- felm(as.formula(paste("d_ln_fiscal_educ ~ lag_ln_fiscal_educ",
+                                          "+", lagged_controls_formula_str,
+                                          lagged_iv_group_formula_str)),
+                         lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+fiscal_social_sec_model <- felm(as.formula(paste("d_ln_fiscal_soc_security ~ lag_ln_fiscal_soc_security",
+                                                 "+", lagged_controls_formula_str,
+                                                 lagged_iv_group_formula_str)),
+                                lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+fiscal_med_model <- felm(as.formula(paste("d_ln_fiscal_medical ~ lag_ln_fiscal_medical",
+                                          "+", lagged_controls_formula_str,
+                                          lagged_iv_group_formula_str)),
+                         lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+fiscal_transport_model <- felm(as.formula(paste("d_ln_fiscal_transport ~ lag_ln_fiscal_transport",
+                                                "+", lagged_controls_formula_str,
+                                                lagged_iv_group_formula_str)),
+                               lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+fiscal_housing_model <- felm(as.formula(paste("d_ln_fiscal_housing ~ lag_ln_fiscal_housing",
+                                              "+", lagged_controls_formula_str,
+                                              lagged_iv_group_formula_str)),
+                             lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+fiscal_asset_model <- felm(as.formula(paste("d_ln_state_fund ~ lag_ln_state_fund",
+                                            "+", lagged_controls_formula_str,
+                                            lagged_iv_group_formula_str)),
+                           lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+```
+
+Produce the top half of table 6
+
+- Note: Column label casing inconsitency
+
+```{r reg_table_6a, results='asis'}
+get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d2_export_cus_pw['F'])
+first_stage_f <- sapply(list(fiscal_pub_sec_model, fiscal_pub_serv_model, fiscal_edu_model,
+                             fiscal_social_sec_model, fiscal_med_model, fiscal_transport_model,
+                             fiscal_housing_model, fiscal_asset_model),
+                        get_first_stage_f)
+
+stargazer(fiscal_pub_sec_model, fiscal_pub_serv_model, fiscal_edu_model,
+          fiscal_social_sec_model, fiscal_med_model, fiscal_transport_model,
+          fiscal_housing_model, fiscal_asset_model,
+          type='html',
+          column.labels = c('Public security', 'Public service', 'Education',
+                            'Social security', 'Medical services', 'Transportation',
+                            'Public housing', 'Fixed assets'),
+          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
+          digits = 4, order = c(14, 1, 2, 3, 4, 5, 6, 7, 8),
           omit = 'lag_dln_', omit.labels = "Additional time-t controls?",
           add.lines = list(c('First-stage F-stat', first_stage_f)))
 ```
