@@ -464,3 +464,73 @@ stargazer(het_fiscal_pub_sec_model, het_fiscal_pub_serv_model,
           omit = 'lag_dln_', omit.labels = "Additional time-t controls?",
           add.lines = list(c('First-stage F-stat', first_stage_f)))
 ```
+
+### Table 7
+
+Regress political turnover of both party secretary & mayor on export shocks.
+For education, we only care about if its master or above, so we collapse 2 and 3
+
+- Q: Political turnover is a lagged effect too, why are we looking at `d_export_cus_pw` instead of `d2_event_pw`?
+- Q: What's residual's median - 1 doing in the regression model?
+- Q: Age bundary >60 or >=60?
+
+- Note: two rows labelled ExportShock
+
+```{r political_turnover_iv}
+secretary_ols_data <- ols_data %>%
+  mutate(age_cat = cut(lead_age_incum_s, breaks=c(-Inf, 50, 55, 60, Inf), labels=c("<50", "50_54","55_59",">=60"), right=F),
+         birth_prov = as.factor(lead_prov_birth_incum_yesno_s),
+         master_above = as.factor(lead_educ_incum_s == 2 | lead_educ_incum_s == 3),
+         sex = as.factor(lead_sex_incum_s),
+         turnover = turnover_s_d,
+         lead_turnover = lead_turnover_s_d,
+         tenure = lead_tenure_incum_s)
+
+mayor_ols_data <- ols_data %>%
+  mutate(age_cat = cut(lead_age_incum_m, breaks=c(-Inf, 50, 55, 60, Inf), labels=c("<50", "50_54","55_59",">=60"), right=F),
+         birth_prov = as.factor(lead_prov_birth_incum_yesno_m),
+         master_above = as.factor(lead_educ_incum_m == 2 | lead_educ_incum_m == 3),
+         sex = as.factor(lead_sex_incum_m),
+         turnover = turnover_m_d,
+         lead_turnover = lead_turnover_m_d,
+         tenure = lead_tenure_incum_m)
+
+secretary_turnover_model <- felm(as.formula(paste("lead_turnover ~ turnover", iv_fe_iv_group_formula_str)),
+                                 secretary_ols_data, weights=secretary_ols_data$pop1564_2010)
+
+reg_formula_str <- "lead_turnover ~ turnover + tenure + age_cat + birth_prov + master_above + sex +"
+secretary_turnover_control_model <- felm(as.formula(paste(reg_formula_str, controls_formula_str, iv_fe_iv_group_formula_str)),
+                                         secretary_ols_data, weights=secretary_ols_data$pop1564_2010)
+
+# TODO:
+# reghdfe lead_turnover_s_d turnover_s_d d_event_pw_resid_g ///
+# lead_tenure_incum i.lead_age_incum_g i.lead_prov_birth_incum_yesno i.lead_educ_incum i.lead_sex_incum  $controls ///
+# (d_export_cus_pw c.d_event_pw_resid_g#c.d_export_cus_pw c.fiscal_rev_tot_pw12#c.d_export_cus_pw ///
+# =d_export_btkrow_pw00 c.d_event_pw_resid_g#c.d_export_btkrow_pw00 c.fiscal_rev_tot_pw12#c.d_export_btkrow_pw00) if year>=2013 & year<=2015 [aweight=pop1564_2010], absorb(prefect province_year) keepsin cluster(province)
+
+
+mayor_turnover_model <- felm(as.formula(paste("lead_turnover ~ turnover", iv_fe_iv_group_formula_str)),
+                             mayor_ols_data, weights=mayor_ols_data$pop1564_2010)
+
+mayor_turnover_control_model <- felm(as.formula(paste(reg_formula_str, controls_formula_str, iv_fe_iv_group_formula_str)),
+                                     mayor_ols_data, weights=mayor_ols_data$pop1564_2010)
+
+```
+
+Produce the table 7:
+
+```{r reg_table_7, results='asis'}
+get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
+first_stage_f <- sapply(list(secretary_turnover_model, secretary_turnover_control_model,
+                             mayor_turnover_model, mayor_turnover_control_model),
+                        get_first_stage_f)
+
+stargazer(secretary_turnover_model, secretary_turnover_control_model,
+          mayor_turnover_model, mayor_turnover_control_model,
+          type='html',
+          column.labels = rep(c('Party secretary', 'Mayor'), each=2),
+          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
+          digits = 4, order=c(14, 1, 2, 3, 4, 5, 6, 7, 8),
+          # omit = 'dln_', omit.labels = "Additional time-t controls?",
+          add.lines = list(c('First-stage F-stat', first_stage_f)))
+```
