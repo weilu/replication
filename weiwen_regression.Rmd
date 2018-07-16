@@ -112,7 +112,9 @@ iv_serv_model <- felm(as.formula(paste("d_event_serv_pw ~ lag_event_serv_pw +",
                       ols_data, weights=ols_data$pop1564_2010)
 ```
 
-Produce regression table 2. The observations and R^2 are different. Stata output is identical to table 1 which is suspicious.
+Produce regression table 2
+
+- Note: The observations and R^2 are different. Stata output is identical to table 1 which is suspicious.
 
 ```{r reg_table_2, results='asis'}
 get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
@@ -251,16 +253,16 @@ Note that the year filter is switched from 2013-2015 to 2014-2016 because the "w
 ```{r prepare_weiwen_lag_data}
 ols_weiwen_data <- workfile_data %>%
   group_by(prefect) %>%
-  mutate(lag_dln_Average_wage = dln_Average_wage - lag(dln_Average_wage, order_by=year),
-         lag_dln_GRP_popCSY = dln_GRP_popCSY - lag(dln_GRP_popCSY, order_by=year),
-         lag_dln_college_enroll_popCSY = dln_college_enroll_popCSY - lag(dln_college_enroll_popCSY, order_by=year),
-         lag_dln_Mobile_Tel_popCSY = dln_Mobile_Tel_popCSY - lag(dln_Mobile_Tel_popCSY, order_by=year),
-         lag_dln_Internet_Tel_popCSY = dln_Internet_Tel_popCSY - lag(dln_Internet_Tel_popCSY, order_by=year)) %>%
+  mutate(lag_dln_Average_wage = lag(dln_Average_wage, order_by=year),
+         lag_dln_GRP_popCSY = lag(dln_GRP_popCSY, order_by=year),
+         lag_dln_college_enroll_popCSY = lag(dln_college_enroll_popCSY, order_by=year),
+         lag_dln_Mobile_Tel_popCSY = lag(dln_Mobile_Tel_popCSY, order_by=year),
+         lag_dln_Internet_Tel_popCSY = lag(dln_Internet_Tel_popCSY, order_by=year)) %>%
   filter(year>=2014 & year<=2016)
 ```
 
 - TODO: check that `d2_export_cus_pw` of year n equals to `d_export_cus_pw` of year n-1
-- TODO: check observation diff in col 2, 4, 6
+- Note: SVM standard errors wrongly printed in Stata table
 
 ```{r iv_weiwen}
 weiwen_iv_group_formula_str <- "| prefect + province_year | (d2_export_cus_pw ~ d2_export_btkrow_pw00) | province"
@@ -269,7 +271,8 @@ iv_keyword_model <- felm(as.formula(paste("d_share_keyword_word ~ lag_share_keyw
                        ols_weiwen_data, weights=ols_weiwen_data$pop1564_2010)
 
 add_lag_prefix <- function(var) paste0('lag_', var)
-weiwen_controls <- sapply(c(controls, extra_controls), add_lag_prefix)
+lag_control_vars <- c(controls, extra_controls)
+weiwen_controls <- sapply(lag_control_vars, add_lag_prefix)
 weiwen_controls_formula_str <- paste(weiwen_controls, collapse=" + ")
 iv_keyword_control_model <- felm(as.formula(paste("d_share_keyword_word ~ lag_share_keyword_word",
                                                   "+", weiwen_controls_formula_str,
