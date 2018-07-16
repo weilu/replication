@@ -248,6 +248,7 @@ stargazer(pub_sec_model, share_state_empl_model, hukou_model,
 
 ### Table 5
 
+IV regressions of export shocks on lagged "Weiwen" emphasis.
 Note that the year filter is switched from 2013-2015 to 2014-2016 because the "weiwen" effect comes with a lag, which in the analysis is set to a year.
 
 ```{r prepare_weiwen_lag_data}
@@ -317,6 +318,10 @@ stargazer(iv_keyword_model, iv_keyword_control_model, iv_bayes_model,
 
 ### Table 6
 
+IV regressions of export shocks on lagged fiscal expenditures.
+
+- Q: Why chose to report log expenditure instead of share of expenditure?
+
 ```{r iv_fiscal_exp}
 fiscal_pub_sec_model <- felm(as.formula(paste("d_ln_fiscal_pub_security ~ lag_ln_fiscal_pub_security",
                                               "+", lagged_controls_formula_str,
@@ -359,7 +364,7 @@ fiscal_asset_model <- felm(as.formula(paste("d_ln_state_fund ~ lag_ln_state_fund
                            lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
 ```
 
-Produce the top half of table 6
+Produce the top half of table 6 – Panel A: Average Effects
 
 - Note: Column label casing inconsitency
 
@@ -379,6 +384,83 @@ stargazer(fiscal_pub_sec_model, fiscal_pub_serv_model, fiscal_edu_model,
                             'Public housing', 'Fixed assets'),
           dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
           digits = 4, order = c(14, 1, 2, 3, 4, 5, 6, 7, 8),
+          omit = 'lag_dln_', omit.labels = "Additional time-t controls?",
+          add.lines = list(c('First-stage F-stat', first_stage_f)))
+```
+
+Examine heterogeneous effects
+
+```{r fiscal_het}
+rev_per_worker_12 <- workfile_data %>%
+  filter(year == 2012) %>%
+  mutate(fiscal_rev_tot_pw12 = fiscal_rev_tot / pop1564_2010) %>%
+  select(prefect, fiscal_rev_tot_pw12)
+
+lagged_ols_data <- lagged_ols_data %>%
+  left_join(rev_per_worker_12, by="prefect") %>%
+  mutate(d2_event_pw_i_d2_export_cus_pw = d2_event_pw*d2_export_cus_pw,
+         d2_event_pw_i_d2_export_btkrow_pw00 = d2_event_pw*d2_export_btkrow_pw00,
+         fiscal_rev_tot_pw12_i_d2_export_cus_pw = fiscal_rev_tot_pw12*d2_export_cus_pw,
+         fiscal_rev_tot_pw12_i_d2_export_btkrow_pw00 = fiscal_rev_tot_pw12*d2_export_btkrow_pw00)
+
+fixed_effect_iv_formula_str <- "+ d2_event_pw | prefect + province_year | (d2_export_cus_pw | d2_event_pw_i_d2_export_cus_pw | fiscal_rev_tot_pw12_i_d2_export_cus_pw ~ d2_export_btkrow_pw00 + d2_event_pw_i_d2_export_btkrow_pw00 + fiscal_rev_tot_pw12_i_d2_export_btkrow_pw00) | province"
+control_iv_str <- paste(lagged_controls_formula_str, fixed_effect_iv_formula_str)
+
+reg_formula_str <- "d_ln_fiscal_pub_security ~ lag_ln_fiscal_pub_security +"
+het_fiscal_pub_sec_model <- felm(as.formula(paste(reg_formula_str, control_iv_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+reg_formula_str <- "d_ln_fiscal_pub_service ~ lag_ln_fiscal_pub_service +"
+het_fiscal_pub_serv_model <- felm(as.formula(paste(reg_formula_str, control_iv_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+reg_formula_str <- "d_ln_fiscal_educ ~ lag_ln_fiscal_educ +"
+het_fiscal_edu_model <- felm(as.formula(paste(reg_formula_str, control_iv_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+reg_formula_str <- "d_ln_fiscal_soc_security ~ lag_ln_fiscal_soc_security +"
+het_fiscal_social_sec_model <- felm(as.formula(paste(reg_formula_str, control_iv_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+reg_formula_str <- "d_ln_fiscal_medical ~ lag_ln_fiscal_medical +"
+het_fiscal_med_model <- felm(as.formula(paste(reg_formula_str, control_iv_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+reg_formula_str <- "d_ln_fiscal_transport ~ lag_ln_fiscal_transport +"
+het_fiscal_transport_model <- felm(as.formula(paste(reg_formula_str, control_iv_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+reg_formula_str <- "d_ln_fiscal_housing ~ lag_ln_fiscal_housing +"
+het_fiscal_housing_model <- felm(as.formula(paste(reg_formula_str, control_iv_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+
+reg_formula_str <- "d_ln_state_fund ~ lag_ln_state_fund +"
+het_fiscal_asset_model <- felm(as.formula(paste(reg_formula_str, control_iv_str)),
+                       lagged_ols_data, weights=lagged_ols_data$pop1564_2010)
+```
+
+Produce the bottom half of table 6 – Panel B: Heterogeneous Effects
+
+- TODO: check first stage F stat calculation for multiple IVs
+
+```{r reg_table_6b, results='asis'}
+get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d2_export_cus_pw['F'])
+first_stage_f <- sapply(list(het_fiscal_pub_sec_model, het_fiscal_pub_serv_model,
+                             het_fiscal_edu_model, het_fiscal_social_sec_model,
+                             het_fiscal_med_model, het_fiscal_transport_model,
+                             het_fiscal_housing_model, het_fiscal_asset_model),
+                        get_first_stage_f)
+
+stargazer(het_fiscal_pub_sec_model, het_fiscal_pub_serv_model,
+          het_fiscal_edu_model, het_fiscal_social_sec_model,
+          het_fiscal_med_model, het_fiscal_transport_model,
+          het_fiscal_housing_model, het_fiscal_asset_model,
+          type='html',
+          column.labels = c('Public security', 'Public service', 'Education',
+                            'Social security', 'Medical services', 'Transportation',
+                            'Public housing', 'Fixed assets'),
+          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
+          digits = 4, order = c(15, 16, 17, 14, 1, 2, 3, 4, 5, 6, 7, 8),
           omit = 'lag_dln_', omit.labels = "Additional time-t controls?",
           add.lines = list(c('First-stage F-stat', first_stage_f)))
 ```
