@@ -29,21 +29,17 @@ ols_data <- workfile_data %>%
   filter(year>=2013 & year<=2015) %>%
   mutate(prefect_dummy = as.factor(prefect),
          province_year_dummy = as.factor(province_year),
-         province_dummy = as.factor(province)) %>%
-  select(d_event_pw, lag_event_pw, d_export_cus_pw, d_export_btkchn_pw00, d_export_btkrow_pw00,
-         prefect_dummy, province_year_dummy, province_dummy, prefect, province_year, province,
-         pop1564_2010,
-         # control variables
-         dln_Average_wage, dln_GRP_popCSY, dln_college_enroll_popCSY,
-         dln_Mobile_Tel_popCSY, dln_Internet_Tel_popCSY,
-         # by sector event data
-         d_event_manuf_pw, lag_event_manuf_pw, d_event_const_pw, lag_event_const_pw,
-         d_event_mine_pw, lag_event_mine_pw, d_event_trans_pw, lag_event_trans_pw,
-         d_event_serv_pw, lag_event_serv_pw,
-         # by cause & gdelt
-         d_event_wage1_pw, lag_event_wage1_pw, d_event_wage2_pw, lag_event_wage2_pw,
-         d_event_wage2a_pw, lag_event_wage2a_pw, d_event_GDELT_pw, lag_event_GDELT_pw,
-         d_event_pca_pw, lag_event_pca_pw
+         province_dummy = as.factor(province),
+         d_export_cus_pw_i_lag_fiscal_pub_security_pw = d_export_cus_pw*lag_fiscal_pub_security_pw,
+         d_export_btkrow_pw00_i_lag_fiscal_pub_security_pw = d_export_btkrow_pw00*lag_fiscal_pub_security_pw,
+         d_export_cus_pw_i_share_state_empl2010 = d_export_cus_pw*share_state_empl2010,
+         d_export_btkrow_pw00_i_share_state_empl2010 = d_export_btkrow_pw00*share_state_empl2010,
+         d_export_cus_pw_i_share_pop_Hukou_2010 = d_export_cus_pw*share_pop_Hukou_2010,
+         d_export_btkrow_pw00_i_share_pop_Hukou_2010 = d_export_btkrow_pw00*share_pop_Hukou_2010,
+         d_export_cus_pw_i_share_college = d_export_cus_pw*share_college,
+         d_export_btkrow_pw00_i_share_college = d_export_btkrow_pw00*share_college,
+         d_export_cus_pw_i_lag_investment_pw = d_export_cus_pw*lag_investment_pw,
+         d_export_btkrow_pw00_i_lag_investment_pw = d_export_btkrow_pw00*lag_investment_pw,
          )
 
 # lm produces the correct point estimates, but standard errors are off
@@ -154,7 +150,8 @@ clb_gdelt_model <- felm(as.formula(paste("d_event_pca_pw ~ lag_event_pca_pw +",
                         ols_data, weights=ols_data$pop1564_2010)
 ```
 
-Produce regression table 3.
+Produce regression table 3. CLB & GDELT event data comes from the first principle of PCA.
+Q: Why didn't GDELT data alone yield significant result?
 
 ```{r reg_table_3, results='asis'}
 get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
@@ -169,6 +166,80 @@ stargazer(clb_wage_model, clb_wage_layoff_model, clb_not_wage_layoff_model,
           dep.var.caption = "Dependent variable: Changes in Events per million",
           dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
           digits = 4, order = c(11, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+          omit = 'dln_', omit.labels = "Additional time-t controls?",
+          add.lines = list(c('First-stage F-stat', first_stage_f)))
+```
+
+### Table 4
+
+Inspect heterogeneous effects
+Q: What is this?
+Q: Why are college & share state employment added to iv term while investment added to dependent variables?
+Q: What do the low fisrt stage F-stats say about this table?
+
+TODO: check observation diff in col 5 & 6
+TODO: check first stage F stat calculation for multiple IVs
+
+```{r iv_het}
+reg_independent_and_dependent_vars <- 'd_event_pw ~ lag_event_pw + lag_fiscal_pub_security_pw'
+reg_fixed_effects <-  '| prefect + province_year'
+reg_formula_str <- paste(reg_independent_and_dependent_vars, reg_fixed_effects)
+
+pub_sec_iv_lhs <- '(d_export_cus_pw|d_export_cus_pw_i_lag_fiscal_pub_security_pw'
+pub_sec_iv_rhs <- '~ d_export_btkrow_pw00 + d_export_btkrow_pw00_i_lag_fiscal_pub_security_pw'
+pub_sec_iv <- paste(pub_sec_iv_lhs, pub_sec_iv_rhs, ')')
+pub_sec_model <- felm(as.formula(paste(reg_formula_str, pub_sec_iv, 'province', sep=' | ')),
+                       ols_data, weights=ols_data$pop1564_2010)
+
+share_state_empl_iv_lhs <- paste(pub_sec_iv_lhs, '|d_export_cus_pw_i_share_state_empl2010')
+share_state_empl_iv_rhs <- paste(pub_sec_iv_rhs, '+ d_export_btkrow_pw00_i_share_state_empl2010')
+share_state_empl_iv <- paste(share_state_empl_iv_lhs, share_state_empl_iv_rhs, ')')
+share_state_empl_model <- felm(as.formula(paste(reg_formula_str, share_state_empl_iv,
+                                                'province', sep=' | ')),
+                               ols_data, weights=ols_data$pop1564_2010)
+
+hukou_iv_lhs <- paste(share_state_empl_iv_lhs, '|d_export_cus_pw_i_share_pop_Hukou_2010')
+hukou_iv_rhs <- paste(share_state_empl_iv_rhs, '+ d_export_btkrow_pw00_i_share_pop_Hukou_2010')
+hukou_iv <- paste(hukou_iv_lhs, hukou_iv_rhs, ')')
+hukou_model <- felm(as.formula(paste(reg_formula_str, hukou_iv, 'province', sep=' | ')),
+                               ols_data, weights=ols_data$pop1564_2010)
+
+college_iv_lhs <- paste(hukou_iv_lhs, '|d_export_cus_pw_i_share_college')
+college_iv_rhs <- paste(hukou_iv_rhs, '+ d_export_btkrow_pw00_i_share_college')
+college_iv <- paste(college_iv_lhs, college_iv_rhs, ')')
+college_model <- felm(as.formula(paste(reg_formula_str, college_iv, 'province', sep=' | ')),
+                               ols_data, weights=ols_data$pop1564_2010)
+
+reg_formula_with_investment_str <- paste(reg_independent_and_dependent_vars,
+                                         '+ lag_investment_pw', reg_fixed_effects)
+investment_iv_lhs <- paste(college_iv_lhs, '|d_export_cus_pw_i_lag_investment_pw')
+investment_iv_rhs <- paste(college_iv_rhs, '+ d_export_btkrow_pw00_i_lag_investment_pw')
+investment_iv <- paste(investment_iv_lhs, investment_iv_rhs, ')')
+investment_model <- felm(as.formula(paste(reg_formula_with_investment_str, investment_iv,
+                                         'province', sep=' | ')),
+                               ols_data, weights=ols_data$pop1564_2010)
+
+reg_formula_with_investment_and_controls_str <- paste(reg_independent_and_dependent_vars,
+                                                      '+ lag_investment_pw +', controls_formula_str,
+                                                      reg_fixed_effects)
+investment_control_model <- felm(as.formula(paste(reg_formula_with_investment_and_controls_str,
+                                         investment_iv, 'province', sep=' | ')),
+                        ols_data, weights=ols_data$pop1564_2010)
+```
+
+Produce regression table 4
+
+```{r reg_table_4, results='asis'}
+get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
+first_stage_f <- sapply(list(pub_sec_model, share_state_empl_model, hukou_model,
+                             college_model, investment_model, investment_control_model),
+                        get_first_stage_f)
+
+stargazer(pub_sec_model, share_state_empl_model, hukou_model,
+          college_model, investment_model, investment_control_model,
+          type='html', column.labels = rep('IV', 6),
+          dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
+          digits = 4, order = c(9, 10, 11, 12, 13, 14, 1, 2, 3),
           omit = 'dln_', omit.labels = "Additional time-t controls?",
           add.lines = list(c('First-stage F-stat', first_stage_f)))
 ```
