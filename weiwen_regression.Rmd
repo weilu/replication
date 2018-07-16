@@ -173,12 +173,12 @@ stargazer(clb_wage_model, clb_wage_layoff_model, clb_not_wage_layoff_model,
 ### Table 4
 
 Inspect heterogeneous effects
-Q: What is this?
-Q: Why are college & share state employment added to iv term while investment added to dependent variables?
-Q: What do the low fisrt stage F-stats say about this table?
+- Q: What is this?
+- Q: Why are college & share state employment added to iv term while investment added to dependent variables?
+- Q: What do the low fisrt stage F-stats say about this table?
 
-TODO: check observation diff in col 5 & 6
-TODO: check first stage F stat calculation for multiple IVs
+- TODO: check observation diff in col 5 & 6
+- TODO: check first stage F stat calculation for multiple IVs
 
 ```{r iv_het}
 reg_independent_and_dependent_vars <- 'd_event_pw ~ lag_event_pw + lag_fiscal_pub_security_pw'
@@ -250,17 +250,17 @@ Note that the year filter is switched from 2013-2015 to 2014-2016 because the "w
 
 ```{r prepare_weiwen_lag_data}
 ols_weiwen_data <- workfile_data %>%
-  filter(year>=2014 & year<=2016) %>%
   group_by(prefect) %>%
   mutate(lag_dln_Average_wage = dln_Average_wage - lag(dln_Average_wage, order_by=year),
          lag_dln_GRP_popCSY = dln_GRP_popCSY - lag(dln_GRP_popCSY, order_by=year),
          lag_dln_college_enroll_popCSY = dln_college_enroll_popCSY - lag(dln_college_enroll_popCSY, order_by=year),
          lag_dln_Mobile_Tel_popCSY = dln_Mobile_Tel_popCSY - lag(dln_Mobile_Tel_popCSY, order_by=year),
-         lag_dln_Internet_Tel_popCSY = dln_Internet_Tel_popCSY - lag(dln_Internet_Tel_popCSY, order_by=year))
+         lag_dln_Internet_Tel_popCSY = dln_Internet_Tel_popCSY - lag(dln_Internet_Tel_popCSY, order_by=year)) %>%
+  filter(year>=2014 & year<=2016)
 ```
 
-TODO: check that `d2_export_cus_pw` of year n equals to `d_export_cus_pw` of year n-1
-TODO: check observation diff in all columns
+- TODO: check that `d2_export_cus_pw` of year n equals to `d_export_cus_pw` of year n-1
+- TODO: check observation diff in col 2, 4, 6
 
 ```{r iv_weiwen}
 weiwen_iv_group_formula_str <- "| prefect + province_year | (d2_export_cus_pw ~ d2_export_btkrow_pw00) | province"
