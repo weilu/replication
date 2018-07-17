@@ -164,10 +164,11 @@ stargazer(clb_wage_model, clb_wage_layoff_model, clb_not_wage_layoff_model,
 ### Table 4
 
 Inspect heterogeneous effects. Examine different characteristics of the prefecture to see if there are stories to tell related to export shocks,
-e.g. lead public security investment -> better prepared for handling protest events -> dampens export shock's effect
+e.g. lead public security investment -> better prepared for handling protest events -> dampens export shock's effect.
 
-- Q: Why are `lag_investment_pw` missing values replaced with 0?
-- Q: Why are college & share state employment added to iv term while investment added to dependent variables?
+- `lag_investment_pw` missing values are replaced with 0s because zeros are represented as missing in the original data source.
+- college & share state employment are not added as depended variables because they are not time variant, while state investment is.
+
 - Q: What do the low fisrt stage F-stats say about this table?
 
 - TODO: check first stage F stat calculation for multiple IVs
@@ -474,16 +475,29 @@ stargazer(het_fiscal_pub_sec_model, het_fiscal_pub_serv_model,
 ### Table 7
 
 Regress political turnover of both party secretary & mayor on export shocks.
-For education, we only care about if its master or above, so we collapse 2 and 3
+- For education, we only care about if its master or above, so we collapse 2 and 3.
+- Political turnover is a lagged effect, since we are using `lead_` for regressors, so we use `d_export_cus_pw` instead of `d2_event_pw`.
+- The base regression model's residual is used as a regressor, because it can be interpreted as "excess number of protest events".
 
-- Q: Political turnover is a lagged effect too, why are we looking at `d_export_cus_pw` instead of `d2_event_pw`?
-- Q: What's residual's median - 1 doing in the regression model?
-- Q: Age bundary >60 or >=60?
-
+- Note: Age bundary should be >=60
 - Note: two rows labelled ExportShock
 
+- TODO: figure out why point estimates are different for col 3 and 6
+
 ```{r political_turnover_iv}
-secretary_ols_data <- ols_data %>%
+base_iv_model <- felm(d_event_pw ~ 0 | prefect + province_year | (d_export_cus_pw ~ d_export_btkrow_pw00) | province,
+                      ols_data, weights=ols_data$pop1564_2010)
+excess_event_median <- median(base_iv_model$residuals)
+
+political_ols_data <- ols_data %>%
+  left_join(rev_per_worker_12, by="prefect") %>%
+  mutate(excess_protest_above_median = (d_event_pw > excess_event_median)) %>%
+  mutate(excess_protest_above_median_i_d_export_cus_pw = excess_protest_above_median * d_export_cus_pw,
+         excess_protest_above_median_i_d_export_btkrow_pw00 = excess_protest_above_median * d_export_btkrow_pw00,
+         fiscal_rev_tot_pw12_i_d_export_cus_pw = fiscal_rev_tot_pw12 * d_export_cus_pw,
+         fiscal_rev_tot_pw12_i_d_export_btkrow_pw00 = fiscal_rev_tot_pw12 * d_export_btkrow_pw00)
+
+secretary_ols_data <- political_ols_data %>%
   mutate(age_cat = cut(lead_age_incum_s, breaks=c(-Inf, 50, 55, 60, Inf), labels=c("<50", "50_54","55_59",">=60"), right=F),
          birth_prov = as.factor(lead_prov_birth_incum_yesno_s),
          master_above = as.factor(lead_educ_incum_s == 2 | lead_educ_incum_s == 3),
@@ -492,7 +506,7 @@ secretary_ols_data <- ols_data %>%
          lead_turnover = lead_turnover_s_d,
          tenure = lead_tenure_incum_s)
 
-mayor_ols_data <- ols_data %>%
+mayor_ols_data <- political_ols_data %>%
   mutate(age_cat = cut(lead_age_incum_m, breaks=c(-Inf, 50, 55, 60, Inf), labels=c("<50", "50_54","55_59",">=60"), right=F),
          birth_prov = as.factor(lead_prov_birth_incum_yesno_m),
          master_above = as.factor(lead_educ_incum_m == 2 | lead_educ_incum_m == 3),
@@ -508,18 +522,21 @@ reg_formula_str <- "lead_turnover ~ turnover + tenure + age_cat + birth_prov + m
 secretary_turnover_control_model <- felm(as.formula(paste(reg_formula_str, controls_formula_str, iv_fe_iv_group_formula_str)),
                                          secretary_ols_data, weights=secretary_ols_data$pop1564_2010)
 
-# TODO:
-# reghdfe lead_turnover_s_d turnover_s_d d_event_pw_resid_g ///
-# lead_tenure_incum i.lead_age_incum_g i.lead_prov_birth_incum_yesno i.lead_educ_incum i.lead_sex_incum  $controls ///
-# (d_export_cus_pw c.d_event_pw_resid_g#c.d_export_cus_pw c.fiscal_rev_tot_pw12#c.d_export_cus_pw ///
-# =d_export_btkrow_pw00 c.d_event_pw_resid_g#c.d_export_btkrow_pw00 c.fiscal_rev_tot_pw12#c.d_export_btkrow_pw00) if year>=2013 & year<=2015 [aweight=pop1564_2010], absorb(prefect province_year) keepsin cluster(province)
-
+political_het_iv_formula_str <- "(d_export_cus_pw | excess_protest_above_median_i_d_export_cus_pw | fiscal_rev_tot_pw12_i_d_export_cus_pw ~ d_export_btkrow_pw00 + excess_protest_above_median_i_d_export_btkrow_pw00 + fiscal_rev_tot_pw12_i_d_export_btkrow_pw00)"
+political_iv_group_formula_str <- paste("| prefect + province_year", political_het_iv_formula_str, "province", sep=" | ")
+secretary_turnover_control_het_model <- felm(as.formula(paste(reg_formula_str, 'excess_protest_above_median +',
+                                                              controls_formula_str, political_iv_group_formula_str)),
+                                             secretary_ols_data, weights=secretary_ols_data$pop1564_2010)
 
 mayor_turnover_model <- felm(as.formula(paste("lead_turnover ~ turnover", iv_fe_iv_group_formula_str)),
                              mayor_ols_data, weights=mayor_ols_data$pop1564_2010)
 
 mayor_turnover_control_model <- felm(as.formula(paste(reg_formula_str, controls_formula_str, iv_fe_iv_group_formula_str)),
                                      mayor_ols_data, weights=mayor_ols_data$pop1564_2010)
+
+mayor_turnover_control_het_model <- felm(as.formula(paste(reg_formula_str, 'excess_protest_above_median +',
+                                                          controls_formula_str, political_iv_group_formula_str)),
+                                         mayor_ols_data, weights=mayor_ols_data$pop1564_2010)
 
 ```
 
@@ -528,15 +545,18 @@ Produce the table 7:
 ```{r reg_table_7, results='asis'}
 get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
 first_stage_f <- sapply(list(secretary_turnover_model, secretary_turnover_control_model,
-                             mayor_turnover_model, mayor_turnover_control_model),
+                             secretary_turnover_control_het_model,
+                             mayor_turnover_model, mayor_turnover_control_model,
+                             mayor_turnover_control_het_model),
                         get_first_stage_f)
 
 stargazer(secretary_turnover_model, secretary_turnover_control_model,
-          mayor_turnover_model, mayor_turnover_control_model,
+          secretary_turnover_control_het_model, mayor_turnover_model,
+          mayor_turnover_control_model, mayor_turnover_control_het_model,
           type='html',
-          column.labels = rep(c('Party secretary', 'Mayor'), each=2),
+          column.labels = rep(c('Party secretary', 'Mayor'), each=3),
           dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
-          digits = 4, order=c(14, 1, 2, 3, 4, 5, 6, 7, 8),
-          # omit = 'dln_', omit.labels = "Additional time-t controls?",
+          digits = 4, order=c(15, 16, 17, 9, 1, 2, 3, 4, 5, 6, 7, 8),
+          omit = 'dln_', omit.labels = "Additional time-t controls?",
           add.lines = list(c('First-stage F-stat', first_stage_f)))
 ```
