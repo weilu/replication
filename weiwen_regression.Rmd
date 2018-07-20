@@ -19,7 +19,7 @@ Model: $\Delta(Events/L)_{it} = \beta_0(Events/L)_{i, t-1} + \beta ExpShock_{it}
 
 Where $X_{it}$ represent additional control variables.
 
-Note that we have verified the stata numbers above, so here we use merged data from stata for regressions directly.
+We have (partially, see weiwen.Rmd) verified the stata numbers above, so here we use merged data from stata for regressions directly.
 
 ### Table 1
 
@@ -78,6 +78,26 @@ stargazer(ols_model, row_iv_model, row_iv_control1_model, row_iv_control2_model,
           add.lines = list(c('First-stage F-stat', '', first_stage_f)))
 ```
 
+In all columns the point estimates, observations and R^2 numbers match Stata output exactly, but we have higher clustered standard errors systematically. This is due to different degree of freedom adjustments in R's `felm` and Stata's `reghdfe`. `felm` adjust DoF the same way as Stata's `areg`, while `reghdfe` handles it similar to `xtreg`. The four commands produce the same point estimates. Below are examples of the commands and SEs produced:
+
+```
+reghdfe d_event_pw d_export_cus_pw lag_event_pw if year>=2013 & year<=2015 [aweight=pop1564_2010], absorb(prefect province_year) keepsin cluster(province)
+
+areg d_event_pw d_export_cus_pw lag_event_pw i.province_year if year>=2013 & year<=2015 [aweight=pop1564_2010], absorb(prefect) cluster(province)
+
+xtset prefect
+xtreg d_event_pw d_export_cus_pw lag_event_pw i.province_year if year>=2013 & year<=2015 [aweight=pop1564_2010], fe cluster(province)
+
+felm(d_event_pw ~ lag_event_pw + d_export_cus_pw  | prefect + province_year | 0 | province, ols_data, weights=ols_data$pop1564_2010)
+
+
+                 | SE by reghdfe | SE by xtreg | SE by areg | SE by felm (R)
+d_export_cus_pw  | .0322948      | .0333305    | .0414917   | .04149172
+lag_event_pw     | .1603443      | .1654867    | .2060073   | .20600729
+```
+
+In our model, it is the case "when the fixed effects swept away by the within-group transformation are nested within clusters" (see [Implementing Fixed Effects Estimation](https://www.kellogg.northwestern.edu/faculty/matsa/htm/fe.htm) for detailed explanation), so `reghdfe` and `xtreg`'s approach of DoF handling is more appropriate – meaning that `felm` and `areg` overestimate the clustered SE in our case. So we are only going to compare the point estimates, observations and R^2 numbers in this replication.
+
 ### Table 2
 
 Build IV models by sector
@@ -121,7 +141,6 @@ stargazer(iv_manuf_model, iv_const_model, iv_mine_model, iv_trans_model, iv_serv
 ### Table 3
 
 Build IV models by cause and GDELT events. The previous regressions' dependent variables are extracted from CLB general protest event data. Here we check CLB protests with specific causes, and a different event source (GDELT).
-TODO: double check data source
 
 ```{r iv_by_cause}
 clb_wage_model <- felm(as.formula(paste("d_event_wage1_pw ~ lag_event_wage1_pw +",
@@ -141,8 +160,7 @@ clb_gdelt_model <- felm(as.formula(paste("d_event_pca_pw ~ lag_event_pca_pw +",
                         ols_data, weights=ols_data$pop1564_2010)
 ```
 
-Produce regression table 3. CLB & GDELT event data comes from the first principle of PCA.
-Q: Why didn't GDELT data alone yield significant result?
+Produce regression table 3. CLB & GDELT event data comes from the first principle of PCA. GDELT isn't significant by itself likely due to noisy data.
 
 ```{r reg_table_3, results='asis'}
 get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
@@ -168,10 +186,7 @@ e.g. lead public security investment -> better prepared for handling protest eve
 
 - `lag_investment_pw` missing values are replaced with 0s because zeros are represented as missing in the original data source.
 - college & share state employment are not added as depended variables because they are not time variant, while state investment is.
-
-- Q: What do the low fisrt stage F-stats say about this table?
-
-- TODO: check first stage F stat calculation for multiple IVs
+- low first stage F stats are expected as there are multiple instruments.
 
 ```{r iv_het_data_prep}
 fill_na_with_zero <- function(var) ifelse(is.na(var), 0, var)
@@ -269,7 +284,6 @@ lagged_ols_data <- workfile_data %>%
   filter(year>=2014 & year<=2016)
 ```
 
-- TODO: check that `d2_export_cus_pw` of year n equals to `d_export_cus_pw` of year n-1
 - Note: SVM standard errors wrongly printed in Stata table
 
 ```{r iv_weiwen}
@@ -326,8 +340,6 @@ stargazer(iv_keyword_model, iv_keyword_control_model, iv_bayes_model,
 ### Table 6
 
 IV regressions of export shocks on lagged fiscal expenditures.
-
-- Q: Why chose to report log expenditure instead of share of expenditure?
 
 ```{r iv_fiscal_exp}
 fiscal_pub_sec_model <- felm(as.formula(paste("d_ln_fiscal_pub_security ~ lag_ln_fiscal_pub_security",
@@ -482,16 +494,15 @@ Regress political turnover of both party secretary & mayor on export shocks.
 - Note: Age bundary should be >=60
 - Note: two rows labelled ExportShock
 
-- TODO: figure out why point estimates are different for col 3 and 6
-
 ```{r political_turnover_iv}
 base_iv_model <- felm(d_event_pw ~ 0 | prefect + province_year | (d_export_cus_pw ~ d_export_btkrow_pw00) | province,
                       ols_data, weights=ols_data$pop1564_2010)
 excess_event_median <- median(base_iv_model$residuals)
-
 political_ols_data <- ols_data %>%
-  left_join(rev_per_worker_12, by="prefect") %>%
-  mutate(excess_protest_above_median = (d_event_pw > excess_event_median)) %>%
+  filter(!is.na(d_event_pw)) %>%
+  left_join(rev_per_worker_12, by="prefect")
+political_ols_data$excess_protest_above_median <- (base_iv_model$residuals > excess_event_median)
+political_ols_data <- political_ols_data %>%
   mutate(excess_protest_above_median_i_d_export_cus_pw = excess_protest_above_median * d_export_cus_pw,
          excess_protest_above_median_i_d_export_btkrow_pw00 = excess_protest_above_median * d_export_btkrow_pw00,
          fiscal_rev_tot_pw12_i_d_export_cus_pw = fiscal_rev_tot_pw12 * d_export_cus_pw,
