@@ -78,6 +78,8 @@ stargazer(ols_model, row_iv_model, row_iv_control1_model, row_iv_control2_model,
           add.lines = list(c('First-stage F-stat', '', first_stage_f)))
 ```
 
+#### Clustered SE discrepancy
+
 In all columns the point estimates, observations and R^2 numbers match Stata output exactly, but we have higher clustered standard errors systematically. This is due to different degree of freedom adjustments in R's `felm` and Stata's `reghdfe`. `felm` adjust DoF the same way as Stata's `areg`, while `reghdfe` handles it similar to `xtreg`. The four commands produce the same point estimates. Below are examples of the commands and SEs produced:
 
 ```
@@ -254,18 +256,12 @@ investment_control_model <- felm(as.formula(paste(reg_formula_with_investment_an
 Produce regression table 4
 
 ```{r reg_table_4, results='asis'}
-get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
-first_stage_f <- sapply(list(pub_sec_model, share_state_empl_model, hukou_model,
-                             college_model, investment_model, investment_control_model),
-                        get_first_stage_f)
-
 stargazer(pub_sec_model, share_state_empl_model, hukou_model,
           college_model, investment_model, investment_control_model,
           type='html', column.labels = rep('IV', 6),
           dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
           digits = 4, order = c(9, 10, 11, 12, 13, 14, 1, 2, 3),
-          omit = 'dln_', omit.labels = "Additional time-t controls?",
-          add.lines = list(c('First-stage F-stat', first_stage_f)))
+          omit = 'dln_', omit.labels = "Additional time-t controls?")
 ```
 
 ### Table 5
@@ -463,13 +459,6 @@ Produce the bottom half of table 6 – Panel B: Heterogeneous Effects
 - TODO: check first stage F stat calculation for multiple IVs
 
 ```{r reg_table_6b, results='asis'}
-get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d2_export_cus_pw['F'])
-first_stage_f <- sapply(list(het_fiscal_pub_sec_model, het_fiscal_pub_serv_model,
-                             het_fiscal_edu_model, het_fiscal_social_sec_model,
-                             het_fiscal_med_model, het_fiscal_transport_model,
-                             het_fiscal_housing_model, het_fiscal_asset_model),
-                        get_first_stage_f)
-
 stargazer(het_fiscal_pub_sec_model, het_fiscal_pub_serv_model,
           het_fiscal_edu_model, het_fiscal_social_sec_model,
           het_fiscal_med_model, het_fiscal_transport_model,
@@ -480,8 +469,7 @@ stargazer(het_fiscal_pub_sec_model, het_fiscal_pub_serv_model,
                             'Public housing', 'Fixed assets'),
           dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
           digits = 4, order = c(15, 16, 17, 14, 1, 2, 3, 4, 5, 6, 7, 8),
-          omit = 'lag_dln_', omit.labels = "Additional time-t controls?",
-          add.lines = list(c('First-stage F-stat', first_stage_f)))
+          omit = 'lag_dln_', omit.labels = "Additional time-t controls?")
 ```
 
 ### Table 7
@@ -554,13 +542,6 @@ mayor_turnover_control_het_model <- felm(as.formula(paste(reg_formula_str, 'exce
 Produce the table 7:
 
 ```{r reg_table_7, results='asis'}
-get_first_stage_f <- function(model) round(model$stage1$iv1fstat$d_export_cus_pw['F'])
-first_stage_f <- sapply(list(secretary_turnover_model, secretary_turnover_control_model,
-                             secretary_turnover_control_het_model,
-                             mayor_turnover_model, mayor_turnover_control_model,
-                             mayor_turnover_control_het_model),
-                        get_first_stage_f)
-
 stargazer(secretary_turnover_model, secretary_turnover_control_model,
           secretary_turnover_control_het_model, mayor_turnover_model,
           mayor_turnover_control_model, mayor_turnover_control_het_model,
@@ -568,6 +549,7 @@ stargazer(secretary_turnover_model, secretary_turnover_control_model,
           column.labels = rep(c('Party secretary', 'Mayor'), each=3),
           dep.var.labels.include = FALSE, omit.stat = c('adj.rsq', 'ser'),
           digits = 4, order=c(15, 16, 17, 9, 1, 2, 3, 4, 5, 6, 7, 8),
-          omit = 'dln_', omit.labels = "Additional time-t controls?",
-          add.lines = list(c('First-stage F-stat', first_stage_f)))
+          omit = 'dln_',
+          # stargazer bug: https://stackoverflow.com/questions/38355337/potential-bug-in-stargazer-omit-labels
+          add.lines = list(c("Additional time-t controls?", "No", "Yes", "Yes", "No", "Yes", "Yes")))
 ```
