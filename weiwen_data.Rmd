@@ -1,9 +1,11 @@
 ---
-title: "[Data Replication]: The Political Economy Consequences of China’s Export Slowdown"
+title: "Data Replication: The Political Economy Consequences of China's Export Slowdown"
 author: "Wei Lu"
 output:
   html_document:
-    toc: TRUE
+    toc: no
+  pdf_document:
+    toc: no
 ---
 
 ```{r setup, include=FALSE}

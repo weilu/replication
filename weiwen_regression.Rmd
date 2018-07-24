@@ -1,9 +1,11 @@
 ---
-title: "Regression Replication: The Political Economy Consequences of China’s Export Slowdown"
+title: "Regression Replication: The Political Economy Consequences of China's Export Slowdown"
 author: "Wei Lu"
 output:
   html_document:
-    toc: TRUE
+    toc: yes
+  pdf_document:
+    toc: yes
 ---
 
 ```{r setup, include=FALSE}
@@ -99,6 +101,10 @@ lag_event_pw     | .1603443      | .1654867    | .2060073   | .20600729
 ```
 
 In our model, it is the case "when the fixed effects swept away by the within-group transformation are nested within clusters" (see [Implementing Fixed Effects Estimation](https://www.kellogg.northwestern.edu/faculty/matsa/htm/fe.htm) for detailed explanation), so `reghdfe` and `xtreg`'s approach of DoF handling is more appropriate – meaning that `felm` and `areg` overestimate the clustered SE in our case. So we are only going to compare the point estimates, observations and R^2 numbers in this replication.
+
+#### First stage F-stat discrepancy
+
+The IV first stage F-stat reported by `felm` is systematically lower than that reported by Stata. I was able to replicate the f-stat reported by `felm` referrencing [this code snippet](https://www.r-bloggers.com/detecting-weak-instruments-in-r/). See `weak_iv.R`. Due to the lack of visibility into Stata's implementation, I cannot be sure what exactly caused the discrepancy.
 
 ### Table 2
 
